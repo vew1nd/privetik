@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Приветик</title>
+<style>
+  :root { --pink:#ff5ad8; --pink-d:#a3167f; --ink:#07050f; --paper:#fff; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; background:#000; color:var(--paper); overflow:hidden;
+    font-family:ui-monospace,"Courier New",monospace; }
+  #stars { position:fixed; inset:0; width:100%; height:100%; image-rendering:pixelated; z-index:0; }
+
+  #home { position:fixed; inset:0; z-index:1; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:36px; padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    transition:opacity .4s steps(4), transform .4s steps(4); }
+  #home.hide { opacity:0; transform:translateY(-24px); pointer-events:none; }
+  h1 { margin:0; font-size:clamp(40px,12vw,88px); font-weight:900; letter-spacing:.04em; text-align:center;
+    text-shadow:4px 4px 0 var(--pink), 8px 8px 0 var(--pink-d); }
+  #go { font:inherit; font-size:clamp(18px,5vw,24px); font-weight:900; color:var(--ink); background:var(--pink);
+    border:4px solid var(--paper); padding:14px 40px; cursor:pointer; box-shadow:0 6px 0 var(--pink-d);
+    transition:transform .08s steps(2), box-shadow .08s steps(2); }
+  #go:hover { background:#ff7be0; }
+  #go:active { transform:translateY(6px); box-shadow:0 0 0 var(--pink-d); }
+  #go:focus-visible, .tb button:focus-visible { outline:3px dashed #fff; outline-offset:3px; }
+
+  .win { position:fixed; z-index:2; left:50%; top:50%; width:min(94vw,560px);
+    transform:translate(-50%,-50%) scale(.2); opacity:0; pointer-events:none; background:var(--ink);
+    border:3px solid var(--paper); box-shadow:6px 6px 0 var(--pink);
+    transition:transform .4s steps(5), opacity .4s steps(5); }
+  .win.open { transform:translate(-50%,-50%) scale(1); opacity:1; pointer-events:auto; }
+  .tb { display:flex; align-items:center; gap:8px; padding:6px 8px; background:var(--pink); color:var(--ink);
+    font-weight:900; font-size:14px; }
+  .tb span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tb button { font:inherit; font-weight:900; width:32px; height:28px; background:var(--ink); color:var(--paper);
+    border:2px solid var(--paper); cursor:pointer; padding:0; }
+  .cv { position:relative; width:100%; aspect-ratio:1/1; max-height:calc(100dvh - 120px); margin:0 auto;
+    overflow:hidden; touch-action:none; cursor:grab; }
+  .cv:active { cursor:grabbing; }
+  #g { position:absolute; left:0; top:0; width:100%; height:100%; transform-origin:0 0;
+    filter:drop-shadow(0 0 3px rgba(255,90,216,.7)); }
+  #note { position:absolute; inset:0; display:none; flex-direction:column; gap:12px; align-items:center;
+    justify-content:center; padding:20px; text-align:center; font-size:14px; line-height:1.5; background:rgba(7,5,15,.92); }
+  #note code { color:var(--pink); }
+  #note input { max-width:100%; font:inherit; font-size:13px; color:#fff; }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+
+<main id="home">
+  <h1>Приветик</h1>
+  <button id="go" type="button">Нажми</button>
+</main>
+
+<section class="win" id="win" aria-label="График функций">
+  <div class="tb">
+    <span id="status">portrait.graph</span>
+    <button id="replay" type="button" title="Нарисовать заново" aria-label="Нарисовать заново">↻</button>
+    <button id="mute" type="button" title="Музыка вкл/выкл" aria-label="Музыка вкл/выкл">♪</button>
+  </div>
+  <div class="cv" id="cv">
+    <canvas id="g"></canvas>
+    <div id="note"></div>
+  </div>
+</section>
+
+<audio id="music" src="dubstep.mp3" loop preload="auto"></audio>
+
+<script>
+/* ================= НАСТРОЙКИ ================= */
+const EQ_FILE   = 'desmos-equations.txt';
+const VIEW = { cx: 5432, cy: 6837, span: 14500 }; // центр и сколько единиц помещается по меньшей стороне
+const DRAW_SECS = 18;                         // за сколько секунд рисуется портрет
+const COLOR     = '#ff9ee8';
+
+/* ================= ЗВЁЗДЫ ================= */
+(() => {
+  const c = document.getElementById('stars'), x = c.getContext('2d');
+  const COLS = ['#ffffff', '#cfe3ff', '#ffd0f4', '#fff3b0'];
+  let stars = [], u = 2, last = 0;
+  function init() {
+    const d = Math.min(devicePixelRatio || 1, 2);
+    c.width = innerWidth * d; c.height = innerHeight * d;
+    u = Math.round(2 * d);
+    const n = Math.round(innerWidth * innerHeight / 5500);
+    stars = Array.from({ length: n }, () => ({
+      x: Math.floor(Math.random() * c.width / u) * u,
+      y: Math.floor(Math.random() * c.height / u) * u,
+      p: Math.random() * 6.28, v: .8 + Math.random() * 3,
+      big: Math.random() < .18, col: COLS[Math.floor(Math.random() * COLS.length)]
+    }));
+  }
+  function tick(t) {
+    requestAnimationFrame(tick);
+    if (t - last < 70) return;           // «рваный» ретро-ритм
+    last = t;
+    x.clearRect(0, 0, c.width, c.height);
+    for (const s of stars) {
+      let a = (Math.sin(t / 1000 * s.v + s.p) + 1) / 2; a *= a;
+      x.globalAlpha = .08 + a * .92; x.fillStyle = s.col;
+      x.fillRect(s.x, s.y, u, u);
+      if (s.big && a > .75) {            // вспышка-крестик
+        x.fillRect(s.x - u, s.y, u, u); x.fillRect(s.x + u, s.y, u, u);
+        x.fillRect(s.x, s.y - u, u, u); x.fillRect(s.x, s.y + u, u, u);
+      }
+    }
+  }
+  addEventListener('resize', init); init(); requestAnimationFrame(tick);
+})();
+
+/* ================= ПАРСЕР DESMOS (LaTeX и обычный текст) ================= */
+const M = Object.assign(Object.fromEntries(Object.getOwnPropertyNames(Math).map(k => [k, Math[k]])), {
+  cot: v => 1 / Math.tan(v), sec: v => 1 / Math.cos(v), csc: v => 1 / Math.sin(v),
+  mod: (a, b) => ((a % b) + b) % b
+});
+const FN = { sin:1, cos:1, tan:1, cot:1, sec:1, csc:1, sinh:1, cosh:1, tanh:1, exp:1, sqrt:1, abs:1,
+  floor:1, ceil:1, round:1, sign:1, min:1, max:1, mod:1, arcsin:'asin', arccos:'acos', arctan:'atan',
+  ln:'log', log:'log10' };
+const C = {}, F = {};                       // константы и функции пользователя
+const mk = (args, body) => new Function('M', 'C', 'F', `return function(${args.join(',')}){return ${body}}`)(M, C, F);
+
+function norm(s) {
+  return s.replace(/\\left|\\right|\\[,!;: ]/g, '').replace(/\\leq?|≤/g, '<=').replace(/\\geq?|≥/g, '>=')
+    .replace(/\\cdot|\\times|·|×/g, '*').replace(/\\div/g, '/').replace(/\\operatorname\{(\w+)\}/g, '\\$1')
+    .replace(/\\mathrm\{(\w+)\}/g, '\\$1');
+}
+function tokenize(s) {
+  const re = /\s*(?:(\d*\.?\d+)|\\([a-zA-Z]+)|([a-zA-Z]+)|(<=|>=|[-+*\/^(){}\[\]|,=<>_]))/y, T = [];
+  while (re.lastIndex < s.length) {
+    const lastI = re.lastIndex, m = re.exec(s);
+    if (!m) { if (!s.slice(lastI).trim()) break; throw Error('символ: ' + s.slice(lastI, lastI + 5)); }
+    if (m[1] !== undefined) T.push({ t: 'n', v: m[1] });
+    else if (m[2]) T.push({ t: 'c', v: m[2] });
+    else if (m[3]) {
+      if (m[3] in FN || m[3] === 'pi') T.push({ t: 'c', v: m[3] });
+      else for (const ch of m[3]) T.push({ t: 'v', v: ch });
+    } else T.push({ t: 'o', v: m[4] });
+  }
+  return T;
+}
+function compile(src, params = []) {
+  const T = tokenize(norm(src)), vars = new Set(), allowed = new Set(['x', 'y', 't', ...params]);
+  let p = 0, absD = 0, tuple = null;
+  const isO = v => T[p] && T[p].t === 'o' && T[p].v === v;
+  const expect = v => { if (!isO(v)) throw Error('ожидалось ' + v); p++; };
+  const args = () => { expect('('); const a = [expr()]; while (isO(',')) { p++; a.push(expr()); } expect(')'); return a; };
+  const startsPrim = () => { const k = T[p]; if (!k) return false;
+    return k.t !== 'o' || k.v === '(' || (k.v === '|' && absD === 0); };
+  function expr() { let a = term(); while (isO('+') || isO('-')) { const o = T[p++].v; a = `(${a}${o}${term()})`; } return a; }
+  function term() {
+    let a = unary();
+    for (;;) {
+      if (isO('*')) { p++; a = `(${a}*${unary()})`; }
+      else if (isO('/')) { p++; a = `(${a}/${unary()})`; }
+      else if (startsPrim()) a = `(${a}*${power()})`;
+      else return a;
+    }
+  }
+  function unary() { if (isO('-')) { p++; return `(-${unary()})`; } if (isO('+')) { p++; return unary(); } return power(); }
+  function power() {
+    let b = primary();
+    if (isO('^')) {
+      p++; let e;
+      if (isO('{')) { p++; e = expr(); expect('}'); }
+      else if (isO('-')) { p++; e = `(-${primary()})`; }
+      else e = primary();
+      b = `Math.pow(${b},${e})`;
+    }
+    return b;
+  }
+  function primary() {
+    const k = T[p++]; if (!k) throw Error('конец строки');
+    if (k.t === 'n') return k.v;
+    if (k.t === 'o') {
+      if (k.v === '(') { const e = expr(); if (isO(',')) { p++; tuple = [e, expr()]; } expect(')'); return e; }
+      if (k.v === '{') { const e = expr(); expect('}'); return `(${e})`; }
+      if (k.v === '|') { absD++; const e = expr(); absD--; expect('|'); return `Math.abs(${e})`; }
+      throw Error('неожиданно ' + k.v);
+    }
+    let name = k.v;
+    if (k.t === 'c') {
+      if (name === 'frac') { expect('{'); const a = expr(); expect('}'); expect('{'); const b = expr(); expect('}'); return `((${a})/(${b}))`; }
+      if (name === 'sqrt') {
+        let n = null; if (isO('[')) { p++; n = expr(); expect(']'); }
+        expect('{'); const a = expr(); expect('}');
+        return n ? `Math.pow(${a},1/(${n}))` : `Math.sqrt(${a})`;
+      }
+      if (name === 'pi') return 'Math.PI';
+      if (name in FN) {
+        let pw = null;
+        if (isO('^')) { p++; if (isO('{')) { p++; pw = expr(); expect('}'); } else pw = T[p++].v; }
+        const a = isO('(') ? args() : [power()];
+        const call = `M.${FN[name] === 1 ? name : FN[name]}(${a.join(',')})`;
+        return pw ? `Math.pow(${call},${pw})` : call;
+      }
+    }
+    if (isO('_')) {                          // индексы: a_1, a_{12}
+      p++; let sub = '';
+      if (isO('{')) { p++; while (!isO('}')) sub += T[p++].v; p++; } else sub = T[p++].v;
+      name += '_' + sub;
+    }
+    if (F[name] && isO('(')) return `F.${name}(${args().join(',')})`;
+    if (allowed.has(name)) { vars.add(name); return name; }
+    if (name in C) return `C.${name}`;
+    if (name === 'e') return 'Math.E';
+    throw Error('неизвестно: ' + name);
+  }
+  const code = expr();
+  if (p < T.length) throw Error('лишнее в конце');
+  return { code, vars, tuple };
+}
+function splitTop(s) {
+  const out = []; let d = 0, cur = '';
+  for (const ch of s) {
+    if ('({['.includes(ch)) d++; if (')}]'.includes(ch)) d--;
+    if (ch === ',' && d === 0) { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur); return out;
+}
+function restriction(r) {
+  if (!r) return { cond: () => true, lo: 0, hi: 1 };
+  const conds = []; let lo = 0, hi = 1;
+  for (const c of splitTop(r)) {
+    const ops = c.match(/<=|>=|<|>|=/g); if (!ops) throw Error('условие без знака');
+    const parts = c.split(/<=|>=|<|>|=/), code = parts.map(q => compile(q).code);
+    conds.push(ops.map((o, i) => `(${code[i]}${o === '=' ? '===' : o}${code[i + 1]})`).join('&&'));
+    parts.forEach((q, i) => {
+      if (q.trim() !== 't') return;
+      try {
+        const ev = s => mk([], s)();
+        if (i > 0 && ops[i - 1][0] === '<') lo = ev(code[i - 1]);
+        if (i < ops.length && ops[i][0] === '<') hi = ev(code[i + 1]);
+        if (i > 0 && ops[i - 1][0] === '>') hi = ev(code[i - 1]);
+        if (i < ops.length && ops[i][0] === '>') lo = ev(code[i + 1]);
+      } catch (e) {}
+    });
+  }
+  return { cond: mk(['x', 'y', 't'], conds.join('&&')), lo, hi };
+}
+function parseLine(line) {
+  let s = norm(line.trim());
+  if (!s || s[0] === '#' || s.startsWith('//')) return null;
+  let r = '';
+  s = s.replace(/\\\{(.*)\\\}\s*$/, (_, a) => { r = a; return ''; });
+  if (!r) { const m = s.match(/\{([^{}]*[<>][^{}]*)\}\s*$/); if (m) { r = m[1]; s = s.slice(0, m.index); } }
+  const rel = s.match(/<=|>=|<|>|=/);
+  if (!rel) {                                      // (a(t), b(t)) — параметрическая кривая или точка
+    const c = compile(s); if (!c.tuple) return null;
+    const R = restriction(r);
+    return { k: 'par', fx: mk(['t'], c.tuple[0]), fy: mk(['t'], c.tuple[1]), c: R.cond, lo: R.lo, hi: R.hi,
+      dot: !/\bt\b/.test(c.tuple.join(',')) };
+  }
+  const L = s.slice(0, rel.index).trim(), Rr = s.slice(rel.index + rel[0].length).trim(), op = rel[0];
+  const fd = L.match(/^([a-zA-Z])\(([a-zA-Z])\)$/);   // f(x)=...
+  if (fd && op === '=') { F[fd[1]] = mk([fd[2]], compile(Rr, [fd[2]]).code); return null; }
+  const R = restriction(r);
+  if (op === '=' && /^[a-zA-Z](_\{?\w+\}?)?$/.test(L) && !/^[xyt]$/.test(L)) {   // a=5
+    const cc = compile(Rr);
+    if (!cc.vars.size) { C[L.replace(/[{}]/g, '')] = mk([], cc.code)(); return null; }
+  }
+  const lc = compile(L), rc = compile(Rr);
+  if (op === '=' && /^y$/.test(L) && !rc.vars.has('y')) return { k: 'y', f: mk(['x'], rc.code), c: R.cond };
+  if (op === '=' && /^x$/.test(L) && !rc.vars.has('x')) return { k: 'x', f: mk(['y'], rc.code), c: R.cond };
+  return { k: op === '=' ? 'imp' : 'ineq', op, f: mk(['x', 'y'], `${lc.code}-(${rc.code})`), c: R.cond };
+}
+function parseAll(text) {
+  const eqs = []; let bad = 0;
+  for (const line of text.split(/\r?\n/)) {
+    try { const e = parseLine(line); if (e) eqs.push(e); }
+    catch (err) { bad++; console.warn('Пропущено:', line.slice(0, 80), '→', err.message); }
+  }
+  console.info(`Уравнений: ${eqs.length}, пропущено: ${bad}`);
+  return eqs;
+}
+
+/* ================= ГЕОМЕТРИЯ (в пикселях холста) ================= */
+function geom(e, W, H, S, cx, cy, cell) {
+  const L = [], R = [];
+  const wx = px => cx + (px - W / 2) / S, wy = py => cy - (py - H / 2) / S;
+  const sx = x => (x - cx) * S + W / 2, sy = y => H / 2 - (y - cy) * S;
+  const LIM = 2 * (W + H);
+  if (e.k === 'y' || e.k === 'x') {
+    const vert = e.k === 'x', n = vert ? H : W; let pa = null;
+    for (let i = 0; i <= n; i++) {
+      const u = vert ? wy(i) : wx(i), v = e.f(u), x = vert ? v : u, y = vert ? u : v;
+      let ok = isFinite(v) && e.c(x, y, 0), X = 0, Y = 0;
+      if (ok) { X = sx(x); Y = sy(y); }
+      if (ok && pa && Math.abs(X - pa[0]) + Math.abs(Y - pa[1]) < LIM) L.push(pa[0], pa[1], X, Y);
+      pa = ok ? [X, Y] : null;
+    }
+  } else if (e.k === 'par') {
+    if (e.dot) { const X = sx(e.fx(0)), Y = sy(e.fy(0)); if (isFinite(X + Y)) R.push(X - 2, Y - 2, 4, 4); }
+    else {
+      let pa = null; const N = 800;
+      for (let i = 0; i <= N; i++) {
+        const t = e.lo + (e.hi - e.lo) * i / N, x = e.fx(t), y = e.fy(t);
+        const ok = isFinite(x + y) && e.c(0, 0, t);
+        const X = ok ? sx(x) : 0, Y = ok ? sy(y) : 0;
+        if (ok && pa) L.push(pa[0], pa[1], X, Y);
+        pa = ok ? [X, Y] : null;
+      }
+    }
+  } else {                                           // implicit / inequality: marching squares
+    const nx = Math.ceil(W / cell) + 1, ny = Math.ceil(H / cell) + 1;
+    let prev = new Float64Array(nx), cur = new Float64Array(nx);
+    const ineq = e.k === 'ineq', gt = e.op[0] === '>';
+    for (let j = 0; j < ny; j++) {
+      const yy = wy(j * cell);
+      for (let i = 0; i < nx; i++) cur[i] = e.f(wx(i * cell), yy);
+      if (j > 0) for (let i = 0; i < nx - 1; i++) {
+        const v0 = prev[i], v1 = prev[i + 1], v2 = cur[i + 1], v3 = cur[i], sum = v0 + v1 + v2 + v3;
+        if (!isFinite(sum)) continue;
+        const X0 = i * cell, Y0 = (j - 1) * cell, mx = wx(X0 + cell / 2), my = wy(Y0 + cell / 2);
+        if (ineq) {
+          if ((gt ? sum > 0 : sum < 0) && e.c(mx, my, 0)) R.push(X0, Y0, cell, cell);
+          continue;
+        }
+        const neg = (v0 < 0) + (v1 < 0) + (v2 < 0) + (v3 < 0);
+        if (neg === 0 || neg === 4 || !e.c(mx, my, 0)) continue;
+        const X1 = X0 + cell, Y1 = Y0 + cell, P = [], lp = (a, b) => a / (a - b);
+        if ((v0 < 0) !== (v1 < 0)) P.push(X0 + cell * lp(v0, v1), Y0);
+        if ((v1 < 0) !== (v2 < 0)) P.push(X1, Y0 + cell * lp(v1, v2));
+        if ((v3 < 0) !== (v2 < 0)) P.push(X0 + cell * lp(v3, v2), Y1);
+        if ((v0 < 0) !== (v3 < 0)) P.push(X0, Y0 + cell * lp(v0, v3));
+        if (P.length === 4) L.push(...P);
+        else if (P.length === 8) {
+          if ((sum < 0) === (v0 < 0)) L.push(P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7]);
+          else L.push(P[0], P[1], P[6], P[7], P[2], P[3], P[4], P[5]);
+        }
+      }
+      [prev, cur] = [cur, prev];
+    }
+  }
+  return { L, R };
+}
+
+/* ================= ГРАФИК ================= */
+const cvBox = document.getElementById('cv'), cv = document.getElementById('g'), ctx = cv.getContext('2d');
+const note = document.getElementById('note'), statusEl = document.getElementById('status');
+let eqs = [], view = { cx: VIEW.cx, cy: VIEW.cy, s: 1 }, rendered = null, job = 0, DPR = 1, cssW = 0, cssH = 0;
+
+function resize() {
+  const r = cvBox.getBoundingClientRect();
+  DPR = Math.min(devicePixelRatio || 1, 2); cssW = r.width; cssH = r.height;
+  cv.width = Math.round(cssW * DPR); cv.height = Math.round(cssH * DPR);
+}
+function resetView() { view = { cx: VIEW.cx, cy: VIEW.cy, s: Math.min(cssW, cssH) / VIEW.span }; }
+function drawGrid() {
+  const W = cv.width, H = cv.height, S = view.s * DPR;
+  ctx.clearRect(0, 0, W, H);
+  const cands = []; for (let k = 0.001; k < 1e7; k *= 10) cands.push(k, 2 * k, 5 * k);
+  const step = cands.find(c => c * view.s >= 30) || 1;
+  const x0 = view.cx - W / 2 / S, x1 = view.cx + W / 2 / S, y0 = view.cy - H / 2 / S, y1 = view.cy + H / 2 / S;
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,.09)'; ctx.beginPath();
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) { const X = Math.round((x - view.cx) * S + W / 2) + .5; ctx.moveTo(X, 0); ctx.lineTo(X, H); }
+  for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) { const Y = Math.round(H / 2 - (y - view.cy) * S) + .5; ctx.moveTo(0, Y); ctx.lineTo(W, Y); }
+  ctx.stroke(); ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.beginPath();
+  const AX = (0 - view.cx) * S + W / 2, AY = H / 2 - (0 - view.cy) * S;
+  ctx.moveTo(AX, 0); ctx.lineTo(AX, H); ctx.moveTo(0, AY); ctx.lineTo(W, AY); ctx.stroke();
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+async function render(animate) {
+  const id = ++job, v = { ...view }, W = cv.width, H = cv.height, S = v.s * DPR, cell = Math.max(2, Math.round(DPR * 1.5));
+  const G = []; let t0 = performance.now();
+  statusEl.textContent = 'считаю…';
+  for (const e of eqs) {
+    G.push(geom(e, W, H, S, v.cx, v.cy, cell));
+    if (performance.now() - t0 > 14) { await tick(); if (id !== job) return; t0 = performance.now(); }
+  }
+  if (id !== job) return;
+  rendered = v; cv.style.transform = '';
+  drawGrid();
+  ctx.lineWidth = Math.max(1.4, DPR * 1.2); ctx.lineCap = 'round'; ctx.strokeStyle = COLOR;
+  ctx.fillStyle = 'rgba(255,158,232,.3)';
+  const total = G.reduce((a, g) => a + (g.L.length + g.R.length) / 4, 0);
+  const per = animate ? Math.max(3, total / (DRAW_SECS * 60)) : Infinity;
+  let gi = 0, off = 0;
+  statusEl.textContent = 'portrait.graph';
+  (function step() {
+    if (id !== job) return;
+    let b = per; ctx.beginPath();
+    while (b > 0 && gi < G.length) {
+      const g = G[gi], nL = g.L.length / 4, nR = g.R.length / 4;
+      if (off < nL) {
+        const k = Math.min(b, nL - off);
+        for (let q = 0; q < k; q++) { const o = (off + q) * 4; ctx.moveTo(g.L[o], g.L[o + 1]); ctx.lineTo(g.L[o + 2], g.L[o + 3]); }
+        off += k; b -= k;
+      } else if (off < nL + nR) {
+        const k = Math.min(b, nL + nR - off);
+        for (let q = 0; q < k; q++) { const o = (off - nL + q) * 4; ctx.fillRect(g.R[o], g.R[o + 1], g.R[o + 2], g.R[o + 3]); }
+        off += k; b -= k;
+      } else { gi++; off = 0; }
+    }
+    ctx.stroke();
+    if (gi < G.length) requestAnimationFrame(step);
+  })();
+}
+
+/* ---- жесты: перетаскивание, колесо, щипок ---- */
+let redrawTimer = 0; const ptrs = new Map();
+function preview() {
+  if (!rendered) return;
+  const k = view.s / rendered.s;
+  const tx = cssW / 2 * (1 - k) + (rendered.cx - view.cx) * view.s, ty = cssH / 2 * (1 - k) + (view.cy - rendered.cy) * view.s;
+  cv.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
+  clearTimeout(redrawTimer); redrawTimer = setTimeout(() => render(false), 200);
+}
+function zoomAt(mx, my, f) {
+  const px = view.cx + (mx - cssW / 2) / view.s, py = view.cy - (my - cssH / 2) / view.s;
+  view.s = Math.min(Math.max(view.s * f, 2), 5000);
+  view.cx = px - (mx - cssW / 2) / view.s; view.cy = py + (my - cssH / 2) / view.s;
+}
+const pos = e => { const r = cvBox.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+cvBox.addEventListener('pointerdown', e => { cvBox.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, pos(e)); });
+cvBox.addEventListener('pointermove', e => {
+  if (!ptrs.has(e.pointerId)) return;
+  const old = ptrs.get(e.pointerId), nw = pos(e);
+  if (ptrs.size === 1) { view.cx -= (nw[0] - old[0]) / view.s; view.cy += (nw[1] - old[1]) / view.s; }
+  else if (ptrs.size === 2) {
+    const other = [...ptrs].find(([id]) => id !== e.pointerId)[1];
+    const d0 = Math.hypot(old[0] - other[0], old[1] - other[1]), d1 = Math.hypot(nw[0] - other[0], nw[1] - other[1]);
+    if (d0 > 0) zoomAt((nw[0] + other[0]) / 2, (nw[1] + other[1]) / 2, d1 / d0);
+  }
+  ptrs.set(e.pointerId, nw); preview();
+});
+['pointerup', 'pointercancel'].forEach(n => cvBox.addEventListener(n, e => ptrs.delete(e.pointerId)));
+cvBox.addEventListener('wheel', e => { e.preventDefault(); const [mx, my] = pos(e); zoomAt(mx, my, Math.exp(-e.deltaY * .0015)); preview(); }, { passive: false });
+
+/* ================= ЗАПУСК ================= */
+const music = document.getElementById('music'), win = document.getElementById('win');
+function showNote(html, withInput) {
+  note.style.display = 'flex'; note.innerHTML = html;
+  if (withInput) note.querySelector('input').addEventListener('change', ev => {
+    const f = ev.target.files[0]; if (!f) return;
+    f.text().then(t => { note.style.display = 'none'; eqs = parseAll(t); resize(); resetView(); render(true); });
+  });
+}
+const eqPromise = fetch(EQ_FILE).then(r => { if (!r.ok) throw 0; return r.text(); }).then(parseAll).catch(() => null);
+
+document.getElementById('go').addEventListener('click', async () => {
+  music.play().catch(() => {});
+  document.getElementById('home').classList.add('hide');
+  win.classList.add('open');
+  await new Promise(r => setTimeout(r, 450));       // дождаться «открытия» окошка
+  resize(); resetView();
+  const res = await eqPromise;
+  if (res) { eqs = res; render(true); }
+  else showNote(`Браузер не дал прочитать <code>${EQ_FILE}</code> (страница открыта как файл).<br>Запусти <code>python -m http.server</code> в этой папке и открой <code>localhost:8000</code> — или выбери файл вручную:<input type="file" accept=".txt">`, true);
+});
+document.getElementById('replay').addEventListener('click', () => { if (!eqs.length) return; resize(); resetView(); render(true); });
+document.getElementById('mute').addEventListener('click', e => {
+  if (music.paused) { music.play(); e.target.style.opacity = 1; } else { music.pause(); e.target.style.opacity = .4; }
+});
+addEventListener('resize', () => { if (win.classList.contains('open') && eqs.length) { resize(); resetView(); render(false); } });
+</script>
+</body>
+</html>
